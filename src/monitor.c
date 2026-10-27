@@ -48,9 +48,64 @@ int handle_event(void *ctx, void *data, size_t data_size) {
   return 0;
 }
 
+// int main(void) {
+//   struct ring_buffer *rb = NULL;
+//   struct monitor_bpf *skel;
+//   int err;
+//
+//   // libbpf logging callback
+//   libbpf_set_print(libbpf_print_fn);
+//
+//   // bump MEMLOCK rlimits
+//   bump_rlimit();
+//
+//   // handle signals
+//   signal(SIGINT, handle_sig);
+//   signal(SIGTERM, handle_sig);
+//
+//   skel = monitor_bpf__open_and_load();
+//   if (!skel) {
+//     fprintf(stderr, "Failed to open and load BPF skeleton\n");
+//     return 1;
+//   }
+//
+//   err = monitor_bpf__attach(skel);
+//   if (err) {
+//     fprintf(stderr, "Failed to attach BPF skeleton\n");
+//     goto cleanup;
+//   }
+//
+//   rb = ring_buffer__new(bpf_map__fd(skel->maps.rb), handle_event, NULL,
+//   NULL); if (!rb) {
+//     err = -1;
+//     fprintf(stderr, "Failed to create ring buffer\n");
+//     goto cleanup;
+//   }
+//
+//   // process events
+//   printf("%-8s %-7s %-16s %-5s %-5s\n", "TIME", "PID", "COMM", "SPORT",
+//          "DPORT");
+//   while (!exiting) {
+//     err = ring_buffer__poll(rb, 100);
+//     if (err == -EINTR) {
+//       err = 0;
+//       break;
+//     }
+//     if (err < 0) {
+//       printf("Error polling ring buffer: %d\n", err);
+//       break;
+//     }
+//   }
+//
+// cleanup:
+//   ring_buffer__free(rb);
+//   monitor_bpf__destroy(skel);
+//   return err < 0 ? -err : 0;
+// }
+
 int main(void) {
   struct ring_buffer *rb = NULL;
-  struct monitor_bpf *skel;
+  struct bpf_object *skel;
   int err;
 
   // libbpf logging callback
@@ -63,19 +118,27 @@ int main(void) {
   signal(SIGINT, handle_sig);
   signal(SIGTERM, handle_sig);
 
-  skel = monitor_bpf__open_and_load();
+  skel = bpf_object__open_file("src/monitor.bpf.o", NULL);
   if (!skel) {
-    fprintf(stderr, "Failed to open and load BPF skeleton\n");
+    fprintf(stderr, "Failed to open BPF object\n");
+    return 1;
+  }
+  if (bpf_object__load(skel) < 0) {
+    fprintf(stderr, "Failed to load BPF object\n");
     return 1;
   }
 
-  err = monitor_bpf__attach(skel);
-  if (err) {
+  struct bpf_program *prog =
+      bpf_object__find_program_by_name(skel, "handle_tcp_probe");
+  struct bpf_link *link = bpf_program__attach(prog);
+  // err = monitor_bpf__attach(skel);
+  if (!link) {
     fprintf(stderr, "Failed to attach BPF skeleton\n");
     goto cleanup;
   }
 
-  rb = ring_buffer__new(bpf_map__fd(skel->maps.rb), handle_event, NULL, NULL);
+  struct bpf_map *map = bpf_object__find_map_by_name(skel, "rb");
+  rb = ring_buffer__new(bpf_map__fd(map), handle_event, NULL, NULL);
   if (!rb) {
     err = -1;
     fprintf(stderr, "Failed to create ring buffer\n");
@@ -99,6 +162,7 @@ int main(void) {
 
 cleanup:
   ring_buffer__free(rb);
-  monitor_bpf__destroy(skel);
+  // monitor_bpf__destroy(skel);
+  bpf_object__close(skel);
   return err < 0 ? -err : 0;
 }
