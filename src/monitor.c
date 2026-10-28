@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <sys/resource.h>
 #include <time.h>
+#include <unistd.h>
 
 #include "../include/monitor.h"
 #include "../include/monitor.skel.h"
@@ -33,80 +34,11 @@ void bump_rlimit(void) {
 static volatile bool exiting = false;
 static void handle_sig(int signal) { exiting = true; }
 
-int handle_event(void *ctx, void *data, size_t data_size) {
-  const struct event *e = data;
-  struct tm *tm;
-  char ts[32];
-  time_t t;
-
-  time(&t);
-  tm = localtime(&t);
-  strftime(ts, sizeof(ts), "%H:%M:%S", tm);
-
-  printf("%-8s PID:%-7d COMM:%-16s SPORT:%-5u DPORT:%-5u\n", ts, e->pid,
-         e->comm, e->sport, e->dport);
-  return 0;
-}
-
-// int main(void) {
-//   struct ring_buffer *rb = NULL;
-//   struct monitor_bpf *skel;
-//   int err;
-//
-//   // libbpf logging callback
-//   libbpf_set_print(libbpf_print_fn);
-//
-//   // bump MEMLOCK rlimits
-//   bump_rlimit();
-//
-//   // handle signals
-//   signal(SIGINT, handle_sig);
-//   signal(SIGTERM, handle_sig);
-//
-//   skel = monitor_bpf__open_and_load();
-//   if (!skel) {
-//     fprintf(stderr, "Failed to open and load BPF skeleton\n");
-//     return 1;
-//   }
-//
-//   err = monitor_bpf__attach(skel);
-//   if (err) {
-//     fprintf(stderr, "Failed to attach BPF skeleton\n");
-//     goto cleanup;
-//   }
-//
-//   rb = ring_buffer__new(bpf_map__fd(skel->maps.rb), handle_event, NULL,
-//   NULL); if (!rb) {
-//     err = -1;
-//     fprintf(stderr, "Failed to create ring buffer\n");
-//     goto cleanup;
-//   }
-//
-//   // process events
-//   printf("%-8s %-7s %-16s %-5s %-5s\n", "TIME", "PID", "COMM", "SPORT",
-//          "DPORT");
-//   while (!exiting) {
-//     err = ring_buffer__poll(rb, 100);
-//     if (err == -EINTR) {
-//       err = 0;
-//       break;
-//     }
-//     if (err < 0) {
-//       printf("Error polling ring buffer: %d\n", err);
-//       break;
-//     }
-//   }
-//
-// cleanup:
-//   ring_buffer__free(rb);
-//   monitor_bpf__destroy(skel);
-//   return err < 0 ? -err : 0;
-// }
-
 int main(void) {
-  struct ring_buffer *rb = NULL;
-  struct bpf_object *skel;
+  // struct ring_buffer *rb = NULL;
+  struct monitor_bpf *skel;
   int err;
+  int map_fd;
 
   // libbpf logging callback
   libbpf_set_print(libbpf_print_fn);
@@ -118,51 +50,74 @@ int main(void) {
   signal(SIGINT, handle_sig);
   signal(SIGTERM, handle_sig);
 
-  skel = bpf_object__open_file("src/monitor.bpf.o", NULL);
+  skel = monitor_bpf__open_and_load();
   if (!skel) {
-    fprintf(stderr, "Failed to open BPF object\n");
-    return 1;
-  }
-  if (bpf_object__load(skel) < 0) {
-    fprintf(stderr, "Failed to load BPF object\n");
+    fprintf(stderr, "Failed to open and load BPF skeleton\n");
     return 1;
   }
 
-  struct bpf_program *prog =
-      bpf_object__find_program_by_name(skel, "handle_tcp_probe");
-  struct bpf_link *link = bpf_program__attach(prog);
-  // err = monitor_bpf__attach(skel);
-  if (!link) {
+  err = monitor_bpf__attach(skel);
+  if (err) {
     fprintf(stderr, "Failed to attach BPF skeleton\n");
     goto cleanup;
   }
 
-  struct bpf_map *map = bpf_object__find_map_by_name(skel, "rb");
-  rb = ring_buffer__new(bpf_map__fd(map), handle_event, NULL, NULL);
-  if (!rb) {
+  // rb = ring_buffer__new(bpf_map__fd(skel->maps.rb), handle_event, NULL,
+  // NULL);
+  map_fd = bpf_map__fd(skel->maps.conn_map);
+  // if (!rb) {
+  //   err = -1;
+  //   fprintf(stderr, "Failed to create ring buffer\n");
+  //   goto cleanup;
+  // }
+  if (map_fd < 0) {
     err = -1;
-    fprintf(stderr, "Failed to create ring buffer\n");
+    fprintf(stderr, "Failed to get map FD\n");
     goto cleanup;
   }
 
   // process events
-  printf("%-8s %-7s %-16s %-5s %-5s\n", "TIME", "PID", "COMM", "SPORT",
-         "DPORT");
+  // printf("%-8s %-7s %-16s %-5s %-5s\n", "TIME", "PID", "COMM", "SPORT",
+  //        "DPORT");
   while (!exiting) {
-    err = ring_buffer__poll(rb, 100);
-    if (err == -EINTR) {
-      err = 0;
-      break;
-    }
-    if (err < 0) {
-      printf("Error polling ring buffer: %d\n", err);
-      break;
+    sleep(1);
+
+    printf("\033[H\033[J");
+    printf("=== Active Connections ===\n");
+    printf("%-8s %-7s %-16s %-5s %-5s\n", "TIME", "PID", "COMM", "SPORT",
+           "DPORT");
+    // err = ring_buffer__poll(rb, 100);
+
+    struct conn_key cur_key = {};
+    struct conn_key next_key;
+    struct conn_stats val;
+
+    // if (err == -EINTR) {
+    //   err = 0;
+    //   break;
+    // }
+    // if (err < 0) {
+    //   printf("Error polling ring buffer: %d\n", err);
+    //   break;
+    // }
+
+    int lookup_err = bpf_map__get_next_key(skel->maps.conn_map, NULL, &next_key,
+                                           sizeof(next_key));
+    while (lookup_err == 0) {
+      if (bpf_map__lookup_elem(skel->maps.conn_map, &cur_key, sizeof(cur_key),
+                               &val, sizeof(val), 0) == 0) {
+        printf("%-7u %-7u %-7u %-12llu %-12llu\n", next_key.pid, next_key.sport,
+               next_key.dport, val.packet_count, val.total_bytes);
+      }
+
+      cur_key = next_key;
+      lookup_err = bpf_map__get_next_key(skel->maps.conn_map, &cur_key,
+                                         &next_key, sizeof(next_key));
     }
   }
 
 cleanup:
-  ring_buffer__free(rb);
-  // monitor_bpf__destroy(skel);
-  bpf_object__close(skel);
+  // ring_buffer__free(rb);
+  monitor_bpf__destroy(skel);
   return err < 0 ? -err : 0;
 }
