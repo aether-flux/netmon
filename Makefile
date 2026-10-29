@@ -37,6 +37,6 @@ $(USER_BIN): $(USER_SRC) $(BPF_OBJ) $(BPF_SKEL)
 	gcc -Wall -O2 $(USER_SRC) -lbpf -lelf -o $@
 
 clean:
-	rm -f $(SRC)/*.o $(USER_BIN) $(BPF_SKEL)
+	rm -f $(SRC)/*.o $(USER_BIN) $(INCLUDE)/vmlinux.h $(BPF_SKEL)
 
 .PHONY: all clean
