@@ -1,3 +1,9 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0
+ * netmon - High-performance eBPF network monitor
+ * Copyright (C) 2026 Amartya Chowdhury
+ */
+
 // clang-format off
 #include "../include/vmlinux.h"
 #include "../include/monitor.h"

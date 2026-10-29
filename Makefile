@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: GPL-3.0
+# netmon - High-performance eBPF network monitor
+# Copyright (C) 2026 Amartya Chowdhury
+
 # Dirs
 SRC := src
 INCLUDE := include
@@ -33,6 +37,6 @@ $(USER_BIN): $(USER_SRC) $(BPF_OBJ) $(BPF_SKEL)
 	gcc -Wall -O2 $(USER_SRC) -lbpf -lelf -o $@
 
 clean:
-	rm -f $(SRC)/*.o $(USER_BIN)
+	rm -f $(SRC)/*.o $(USER_BIN) $(BPF_SKEL)
 
 .PHONY: all clean

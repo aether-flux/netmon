@@ -1,3 +1,9 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0
+ * netmon - High-performance eBPF network monitor
+ * Copyright (C) 2026 Amartya Chowdhury
+ */
+
 #include <bpf/libbpf.h>
 #include <math.h>
 #include <signal.h>
@@ -6,7 +12,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/resource.h>
-// #include <time.h>
 #include <unistd.h>
 
 #include "../include/monitor.h"
@@ -83,13 +88,14 @@ int main(void) {
     sleep(1);
 
     printf("\033[H\033[J");
-    printf("================================== netmon "
-           "================================="
+    printf("====================================== netmon "
+           "====================================="
            "\n\n");
-    printf("%-15s | %-7s | %-7s | %-12s | %-12s | %-7s\n", "LAST SEEN (ms)",
-           "SPORT", "DPORT", "PACKET COUNT", "TOTAL BYTES", "STATE");
+    printf("%-25s | %-7s | %-7s | %-12s | %-12s | %-7s\n",
+           "LAST SEEN (ms since boot)", "SPORT", "DPORT", "PACKET COUNT",
+           "TOTAL BYTES", "STATE");
     printf("-------------------------------------------------------------------"
-           "-------\n");
+           "----------------\n");
 
     struct conn_key cur_key = {};
     struct conn_key next_key;
@@ -100,9 +106,9 @@ int main(void) {
     while (lookup_err == 0) {
       if (bpf_map__lookup_elem(skel->maps.conn_map, &cur_key, sizeof(cur_key),
                                &val, sizeof(val), 0) == 0) {
-        double ts_ms = (double)val.last_seen_timestamp / 1000000.0;
+        __u64 ts_ms = (__u64)val.last_seen_timestamp / 1000000.0;
 
-        printf("%-15.2f | %-7u | %-7u | %-12llu | %-12llu | %-7s\n", ts_ms,
+        printf("%-25llu | %-7u | %-7u | %-12llu | %-12llu | %-7s\n", ts_ms,
                next_key.sport, next_key.dport, val.packet_count,
                val.total_bytes, state_str(val.state));
       }
@@ -110,11 +116,12 @@ int main(void) {
       cur_key = next_key;
       lookup_err = bpf_map__get_next_key(skel->maps.conn_map, &cur_key,
                                          &next_key, sizeof(next_key));
+
+      fflush(stdout);
     }
   }
 
 cleanup:
-  // ring_buffer__free(rb);
   monitor_bpf__destroy(skel);
   return err < 0 ? -err : 0;
 }

@@ -1,10 +1,13 @@
+/*
+ * SPDX-License-Identifier: GPL-3.0
+ * netmon - High-performance eBPF network monitor
+ * Copyright (C) 2026 Amartya Chowdhury
+ */
+
 #ifndef MONITOR_H
 #define MONITOR_H
 
-// #include "vmlinux.h"
-
 struct conn_key {
-  // socket_state state;
   unsigned short sport;
   unsigned short dport;
   unsigned short saddr[16];
