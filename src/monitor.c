@@ -6,7 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/resource.h>
-#include <time.h>
+// #include <time.h>
 #include <unistd.h>
 
 #include "../include/monitor.h"
@@ -31,11 +31,20 @@ void bump_rlimit(void) {
   }
 }
 
+const char *state_str(int state) {
+  const char *states[] = {"UNKNOWN",     "ESTAB",     "SYN_SENT",  "SYN_RECV",
+                          "FIN_WAIT1",   "FIN_WAIT2", "TIME_WAIT", "CLOSE",
+                          "CLOSE_WAIT",  "LAST_ACK",  "LISTEN",    "CLOSING",
+                          "NEW_SYN_RECV"};
+  if (state >= 0 && state <= 12)
+    return states[state];
+  return "UNKNOWN";
+}
+
 static volatile bool exiting = false;
 static void handle_sig(int signal) { exiting = true; }
 
 int main(void) {
-  // struct ring_buffer *rb = NULL;
   struct monitor_bpf *skel;
   int err;
   int map_fd;
@@ -62,14 +71,7 @@ int main(void) {
     goto cleanup;
   }
 
-  // rb = ring_buffer__new(bpf_map__fd(skel->maps.rb), handle_event, NULL,
-  // NULL);
   map_fd = bpf_map__fd(skel->maps.conn_map);
-  // if (!rb) {
-  //   err = -1;
-  //   fprintf(stderr, "Failed to create ring buffer\n");
-  //   goto cleanup;
-  // }
   if (map_fd < 0) {
     err = -1;
     fprintf(stderr, "Failed to get map FD\n");
@@ -77,37 +79,32 @@ int main(void) {
   }
 
   // process events
-  // printf("%-8s %-7s %-16s %-5s %-5s\n", "TIME", "PID", "COMM", "SPORT",
-  //        "DPORT");
   while (!exiting) {
     sleep(1);
 
     printf("\033[H\033[J");
-    printf("=== Active Connections ===\n");
-    printf("%-8s %-7s %-16s %-5s %-5s\n", "TIME", "PID", "COMM", "SPORT",
-           "DPORT");
-    // err = ring_buffer__poll(rb, 100);
+    printf("================================== netmon "
+           "================================="
+           "\n\n");
+    printf("%-15s | %-7s | %-7s | %-12s | %-12s | %-7s\n", "LAST SEEN (ms)",
+           "SPORT", "DPORT", "PACKET COUNT", "TOTAL BYTES", "STATE");
+    printf("-------------------------------------------------------------------"
+           "-------\n");
 
     struct conn_key cur_key = {};
     struct conn_key next_key;
     struct conn_stats val;
-
-    // if (err == -EINTR) {
-    //   err = 0;
-    //   break;
-    // }
-    // if (err < 0) {
-    //   printf("Error polling ring buffer: %d\n", err);
-    //   break;
-    // }
 
     int lookup_err = bpf_map__get_next_key(skel->maps.conn_map, NULL, &next_key,
                                            sizeof(next_key));
     while (lookup_err == 0) {
       if (bpf_map__lookup_elem(skel->maps.conn_map, &cur_key, sizeof(cur_key),
                                &val, sizeof(val), 0) == 0) {
-        printf("%-7u %-7u %-7u %-12llu %-12llu\n", next_key.pid, next_key.sport,
-               next_key.dport, val.packet_count, val.total_bytes);
+        double ts_ms = (double)val.last_seen_timestamp / 1000000.0;
+
+        printf("%-15.2f | %-7u | %-7u | %-12llu | %-12llu | %-7s\n", ts_ms,
+               next_key.sport, next_key.dport, val.packet_count,
+               val.total_bytes, state_str(val.state));
       }
 
       cur_key = next_key;
